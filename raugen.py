@@ -5,6 +5,8 @@ import os
 import sys
 import shutil
 import random
+
+from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
 # Global variables
@@ -15,6 +17,8 @@ AUGMENTED = 100
 ADD_ORIGINAL = True
 ## Resample algorithm
 RESAMPLE = Image.BICUBIC
+## Degree of parallelism
+THREAD_COUNT = cpu_count()
 
 def random_rot(img):
     '''Rotate image by a random angle
@@ -105,22 +109,37 @@ def process_category(dir_in, dir_out):
         path_out = os.path.join(dir_out, 'aug_{}_{}'.format(i, orig))
         process_image(path_in, path_out)
 
-        
+
+def _process_category(args):
+    '''Wrapper around process_category to be passed to imap'''
+    dir_in, dir_out, entry = args
+    category_path = os.path.join(dir_in, entry)
+
+    if not os.path.isdir(category_path):
+        print("[WARNING] Unexpected entry: {}".format(entry))
+
+    category_path_out = os.path.join(dir_out, entry)
+    os.makedirs(category_path_out)
+
+    process_category(category_path, category_path_out)
+
+
 def process(dir_in, dir_out):
     if len(os.listdir(dir_out)) != 0:
         print("Expected empty out directory")
         print_usage()
-        
-    for entry in tqdm(os.listdir(dir_in)):
-        category_path = os.path.join(dir_in, entry)
 
-        if not os.path.isdir(category_path):
-            print("[WARNING] Unexpected entry: {}".format(entry))
+    # Directories of categories
+    directories = os.listdir(dir_in)
+    total = len(directories)
 
-        category_path_out = os.path.join(dir_out, entry)
-        os.makedirs(category_path_out)
+    def generate_args():
+        for entry in directories:
+            yield dir_in, dir_out, entry
 
-        process_category(category_path, category_path_out)
+    with Pool(THREAD_COUNT) as pool:
+        for _ in tqdm(pool.imap_unordered(_process_category, generate_args()), total=total):
+            pass
 
     
 def print_usage():
